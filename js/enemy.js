@@ -1,8 +1,6 @@
 class Enemy {
 
     constructor() {
-        // FIX: Enemy had no width/height, so checkCollision returned NaN comparisons
-        // and monsters could never hit the player. Body now matches the drawn size.
         this.width = 50;
         this.height = 50;
 
@@ -15,10 +13,11 @@ class Enemy {
         this.image = monsterImg;
     }
 
-    update() {
+    update(targetY, speed) {
+        var pos = this.body.position;
         Body.setPosition(this.body, {
-            x: this.body.position.x - 1,
-            y: this.body.position.y - 0.3
+            x: pos.x - (2 + speed * 0.25),
+            y: pos.y + (targetY - pos.y) * 0.03 + Math.sin(frameCount * 0.1) * 1.5
         });
     }
 

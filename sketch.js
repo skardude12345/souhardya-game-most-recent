@@ -28,6 +28,12 @@ var score = 0;
 var bonus = 0;
 var gameFrames = 0;
 var gameSpeed = 5;
+var stamina = 100, combo = 0, lastKillFrame = -999;
+var nextObstacleFrame = 80, nextMonsterFrame = 600, nextPotionFrame = 900;
+var HEAL = 6;
+var clicked = false, clickX = 0, clickY = 0;
+var bgOffset = 0, groundOffset = 0;
+var swingUntil = 0;
 
 function preload() {
   groundImg = loadImage("./images/ground.png");
@@ -37,8 +43,9 @@ function preload() {
   returnImg = loadImage("./images/return.png");
   potionImg = loadImage("./images/potion.png");
 
+  // FIX: load these once here, not inside constructors every spawn
   playerImg = loadImage("./images/sam.png");
-  swordImg = loadImage("./images/sword.png");
+  swordImg = loadImage("./images/flail.png");
   monsterImg = loadImage("./images/monster.png");
   spikesImg = loadImage("./images/spikes.png");
 
@@ -47,19 +54,21 @@ function preload() {
 
 function setup() {
   createCanvas(800, 400);
+  noSmooth();   // keep pixel art crisp
+
+  window.addEventListener("mousedown", function (e) {
+    var cvs = document.getElementsByTagName("canvas")[0];
+    if (!cvs) return;
+    var r = cvs.getBoundingClientRect();
+    clickX = (e.clientX - r.left) * (width / r.width);
+    clickY = (e.clientY - r.top) * (height / r.height);
+    clicked = true;
+  });
 
   engine = Engine.create();
   world = engine.world;
 
   ground = new Ground(width / 2, 380, width * 2, 40);
-
-  landScape = createSprite(width, height / 2, width * 2, 40);
-  landScape.addImage(landScapeImg);
-  landScape.velocityX = 0;
-
-  groundSp = createSprite(width, 380, width * 2, 40);
-  groundSp.addImage(groundImg);
-  groundSp.velocityX = 0;
 
   play = createSprite(width / 2, height / 2);
   play.addImage(playImg);
@@ -71,15 +80,15 @@ function setup() {
   howTo.scale = 0.3;
   howTo.visible = false;
 
-  returnMenu = createSprite(500, 300);
+  returnMenu = createSprite(400, 315);
   returnMenu.addImage(returnImg);
-  returnMenu.scale = 0.6;
+  returnMenu.scale = 1;
   returnMenu.visible = false;
 
   gameState = "start";
 }
 
-
+// Helper: p5.play versions differ (remove vs destroy)
 function killSprite(s) {
   if (!s) return;
   if (s.remove) s.remove();
@@ -110,10 +119,20 @@ function startGame() {
 
   player = new Player();
 
-  landScape.x = width;
-  groundSp.x = width;
-  landScape.velocityX = -0.8;
-  groundSp.velocityX = -gameSpeed;
+  stamina = 100;
+  combo = 0;
+  lastKillFrame = -999;
+  nextObstacleFrame = 80;
+  nextMonsterFrame = 600;
+  nextPotionFrame = 900;
+
+  // sword is now always equipped, hanging off the player like a flail
+  sword = new Sword(player.body.position.x + 60, player.body.position.y);
+  swordlash = new SwordLash(player.body, sword.body);
+  isAttacking = true;
+
+  bgOffset = 0;
+  groundOffset = 0;
 
   play.visible = false;
   howTo.visible = false;
@@ -123,7 +142,13 @@ function startGame() {
 }
 
 function draw() {
+  drawFrame();
+  clicked = false;   // a click only lasts one frame
+}
+
+function drawFrame() {
   background(255);
+  drawBackground();
 
   Engine.update(engine);
 
@@ -131,21 +156,18 @@ function draw() {
   fill(255);
 
   if (gameState === "start") {
-    ground.display();
 
-    landScape.velocityX = 0;
-    groundSp.velocityX = 0;
 
     play.visible = true;
     howTo.visible = true;
 
     drawSprites();
 
-    if (mousePressedOver(play)) {
+    if (clickedOn(play, playImg)) {
       startGame();
     }
 
-    if (mousePressedOver(howTo)) {
+    if (clickedOn(howTo, howToImg)) {
       gameState = "howto";
       play.visible = false;
       howTo.visible = false;
@@ -154,10 +176,10 @@ function draw() {
 
   } else if (gameState === "howto") {
 
-    ground.display();
     drawSprites();
 
     push();
+    rectMode(CENTER);   // was inherited from ground.display() before
     fill(99, 23, 10);
     rect(400, 200, 500, 300);
     pop();
@@ -167,9 +189,10 @@ function draw() {
 
     fill(255);
     textSize(35);
-    text("CONTROLS:\nJump: Space\nDescend: Down arrow\nAttack: Hold E", 170, 100);
+    textLeading(42);
+    text("CONTROLS:\nJump: Space\nDescend: Down arrow\nSwing sword: E", 170, 100);
 
-    if (mousePressedOver(returnMenu)) {
+    if (clickedOn(returnMenu, returnImg)) {
       gameState = "start";
       returnMenu.visible = false;
     }
@@ -181,75 +204,80 @@ function draw() {
 
     // FIX: old difficulty scaling (score / 1000000) did basically nothing
     gameSpeed = Math.min(5 + score / 150, 12);
-    groundSp.velocityX = -gameSpeed;
+    bgOffset += 0.8;
+    groundOffset += gameSpeed;
 
     player.jump();
-    ground.display();
 
     // Scroll background
-    if (groundSp.x <= 0) groundSp.x = width;
-    if (landScape.x <= 0) landScape.x = width;
 
-    // Spawn obstacles
-    if (gameFrames % 80 === 0) {
-      obstacleArr.push(new Obstacle());
+    // Spawn obstacles: faster over time, sometimes in pairs
+    if (gameFrames >= nextObstacleFrame) {
+      obstacleArr.push(new Obstacle(0));
+      if (random() < Math.min(0.15 + score / 1500, 0.5)) {
+        obstacleArr.push(new Obstacle(75));
+      }
+      nextObstacleFrame = gameFrames + Math.max(40, Math.floor(random(55, 95) - score / 15));
     }
 
-    // Spawn monsters
-    if (gameFrames % 800 === 0) {
+    // Spawn monsters: more often over time
+    if (gameFrames >= nextMonsterFrame) {
       monsterArr.push(new Enemy());
+      nextMonsterFrame = gameFrames + Math.max(240, 600 - score);
     }
 
-    // Spawn potions
-    if (gameFrames % 200 === 0) {
-      var potion = createSprite(width, height - random(90, 200), 20, 20);
-      potion.scale = 3;
-      potion.addImage(potionImg);
-      potionArr.push(potion);
+    // Rare free potion (main healing now comes from killing monsters)
+    if (gameFrames >= nextPotionFrame) {
+      spawnPotion(width, height - random(90, 200));
+      nextPotionFrame = gameFrames + 900;
     }
 
-    // Sword attack (hold E)
-    if (keyWentDown("e") && !isAttacking) {
-      isAttacking = true;
-      sword = new Sword(player.body.position.x + 50, player.body.position.y);
-      swordlash = new SwordLash(player.body, sword.body);
+    // Sword swing (E): whips the sword forward, costs stamina
+    stamina = Math.min(100, stamina + 0.6);
+    if (keyWentDown("e") && stamina >= 35 && sword) {
+      stamina -= 35;
+      Body.setVelocity(sword.body, { x: 20, y: -10 });
+      Body.setAngularVelocity(sword.body, 0.5);
+      swingUntil = gameFrames + 30;   // only lethal during a swing
     }
+    if (combo > 0 && gameFrames - lastKillFrame > 120) combo = 0;
+    if (swordlash) swordlash.apply();
 
-    if (keyWentUp("e") && isAttacking) {
-      removeSword();
-    }
-
-    // Obstacles: update once per frame (was being updated/drawn twice)
+    // Obstacles
     for (let i = obstacleArr.length - 1; i >= 0; i--) {
       var o = obstacleArr[i];
       o.update(gameSpeed);
 
-      if (isAttacking && swordHits(o)) {
-        bonus += 10;
+      if (swordLethal() && swordHits(o)) {
+        registerKill(10);
         World.remove(world, o.body);
         obstacleArr.splice(i, 1);
       } else if (checkCollision(player, o)) {
         player.health -= 10;
+        combo = 0;
         World.remove(world, o.body);
         obstacleArr.splice(i, 1);
       } else if (o.isOffScreen()) {
-        // FIX: off-screen obstacles were never removed
         World.remove(world, o.body);
         obstacleArr.splice(i, 1);
       }
     }
 
-    // Monsters
+    // Monsters (they home in on you now)
     for (let i = monsterArr.length - 1; i >= 0; i--) {
       var m = monsterArr[i];
-      m.update();
+      m.update(player.body.position.y, gameSpeed);
 
-      if (isAttacking && swordHits(m)) {
-        bonus += 50;
+      if (swordLethal() && swordHits(m)) {
+        registerKill(50);
+        if (random() < 0.5) {
+          spawnPotion(m.body.position.x, constrain(m.body.position.y, 150, 310));
+        }
         World.remove(world, m.body);
         monsterArr.splice(i, 1);
       } else if (checkCollision(player, m)) {
-        player.health -= 10;
+        player.health -= 15;
+        combo = 0;
         World.remove(world, m.body);
         monsterArr.splice(i, 1);
       } else if (m.isOffScreen()) {
@@ -263,9 +291,8 @@ function draw() {
       var p = potionArr[i];
       p.velocityX = -gameSpeed;
 
-      // FIX: potions are p5.play sprites with no .body, so checkCollision always failed
       if (overlapsSprite(player, p)) {
-        player.health = Math.min(player.health + 10, 100);
+        player.health = Math.min(player.health + HEAL, 100);
         killSprite(p);
         potionArr.splice(i, 1);
       } else if (p.position.x < -50) {
@@ -282,8 +309,8 @@ function draw() {
     for (let m of monsterArr) m.display();
 
     if (isAttacking && sword) {
+      swordlash.display();   // rope first, ball on top
       sword.display();
-      swordlash.display();
     }
 
     player.display();
@@ -295,6 +322,21 @@ function draw() {
     text("Health: " + Math.max(0, Math.round(player.health)), 40, 40);
     text("Score: " + score, 500, 40);
 
+    push();
+    rectMode(CORNER);
+    stroke(0);
+    fill(60);
+    rect(40, 55, 150, 12);
+    noStroke();
+    fill(stamina >= 35 ? color(80, 200, 255) : color(200, 80, 80));
+    rect(40, 55, 150 * stamina / 100, 12);
+    pop();
+
+    if (combo > 1) {
+      textSize(40);
+      text("COMBO x" + combo, 40, 100);
+    }
+
     if (player.health <= 0) {
       removeSword();
       for (let p of potionArr) p.velocityX = 0;
@@ -303,10 +345,7 @@ function draw() {
 
   } else if (gameState === "end") {
 
-    ground.display();
 
-    groundSp.velocityX = 0;
-    landScape.velocityX = 0;
 
     drawSprites();
 
@@ -314,13 +353,17 @@ function draw() {
     for (let m of monsterArr) m.display();
     if (player) player.display();
 
+    // centered, and kept above the player so nothing overlaps
+    push();
     fill("black");
+    textAlign(CENTER);
     textSize(100);
-    text("GAME OVER", 180, 200);
+    text("GAME OVER", width / 2, 140);
 
     textSize(35);
-    text("Final Score: " + score, 300, 260);
-    text("Press R to restart", 300, 300);
+    text("Final Score: " + score, width / 2, 200);
+    text("Press R to restart", width / 2, 245);
+    pop();
 
     // FIX: there was no way to restart
     if (keyWentDown("r")) {
@@ -358,14 +401,14 @@ function overlapsSprite(player, s) {
   return dx < (player.width + 40) / 2 && dy < (player.height + 40) / 2;
 }
 
-
+// Sword vs obstacle/monster
 function swordHits(obj) {
   if (!sword || !sword.body || !obj || !obj.body) return false;
   return Bounds.overlaps(sword.body.bounds, obj.body.bounds);
 }
 
 
-
+// Remove sword and its constraint
 function removeSword() {
 
   if (sword && sword.body) {
@@ -380,4 +423,60 @@ function removeSword() {
   swordlash = undefined;
 
   isAttacking = false;
+}
+
+
+// Sword only hurts things while it's moving fast (you have to actually swing it)
+function swordLethal() {
+  return sword && sword.body && gameFrames <= swingUntil;
+}
+
+function registerKill(base) {
+  combo = Math.min(combo + 1, 5);
+  lastKillFrame = gameFrames;
+  bonus += base * combo;
+}
+
+function spawnPotion(x, y) {
+  var potion = createSprite(x, y, 20, 20);
+  potion.scale = 3;
+  potion.addImage(potionImg);
+  potionArr.push(potion);
+}
+
+
+// Seamless scrolling: every other tile is mirrored, so the edges always match
+function drawLayer(img, offset, y) {
+  var w = img.width;
+  var first = Math.floor(offset / w);
+  for (var i = first; i <= first + 1; i++) {
+    var x = i * w - offset;
+    push();
+    if (i % 2 === 0) {
+      image(img, x, y);
+    } else {
+      translate(x + w, y);
+      scale(-1, 1);
+      image(img, 0, 0);
+    }
+    pop();
+  }
+}
+
+function drawBackground() {
+  push();
+  imageMode(CORNER);
+  drawLayer(landScapeImg, bgOffset, 0);
+  drawLayer(groundImg, groundOffset, 360);
+  pop();
+}
+
+
+// Button click test in canvas coordinates (independent of p5.play + CSS scaling)
+function clickedOn(spr, img) {
+  if (!clicked || !spr.visible) return false;
+  var w = img.width * spr.scale;
+  var h = img.height * spr.scale;
+  return Math.abs(clickX - spr.position.x) <= w / 2 &&
+         Math.abs(clickY - spr.position.y) <= h / 2;
 }

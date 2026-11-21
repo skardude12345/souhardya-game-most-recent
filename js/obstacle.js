@@ -1,10 +1,12 @@
 class Obstacle {
 
-    constructor() {
-        this.width = 60;
+    constructor(offsetX = 0) {
+        this.width = 64;
         this.height = 40;
 
-        this.body = Bodies.rectangle(width + this.width, 340, this.width, this.height, {
+        // y = 340 so it sits on top of the ground (ground top edge is at 360)
+        // static + sensor: moved manually, never physically pushes the player
+        this.body = Bodies.rectangle(width + this.width + offsetX, 340, this.width, this.height, {
             isStatic: true,
             isSensor: true
         });
