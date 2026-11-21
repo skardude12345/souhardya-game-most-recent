@@ -1,33 +1,22 @@
 class Sword {
 
-    constructor() {
-        this.body = Bodies.rectangle(450, 250, 5, 100, { isStatic: false });
+    constructor(x, y) {
+        this.body = Bodies.rectangle(x, y, 20, 100, {
+            frictionAir: 0.05,
+            collisionFilter: { group: -1 }  
+        });
         World.add(world, this.body);
 
-        this.image = loadImage("./images/sword.png");
-
-        //this.width = 5;
-        //this.height = 100;
-
-        
+        this.image = swordImg;
     }
 
     display() {
-
-        var angle = this.body.angle;
-
         push();
         translate(this.body.position.x, this.body.position.y);
-        angleMode(RADIANS);
-        rotate(angle);
+        rotate(this.body.angle);
         imageMode(CENTER);
         image(this.image, 0, 0, 100, 100);
         pop();
-
-        // rect(this.body.position.x, this.body.position.y, 50, 100);
-
-
-        
     }
 
 }
